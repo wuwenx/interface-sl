@@ -2,6 +2,8 @@
 from typing import Dict
 from app.services.exchanges.base import BaseExchange
 from app.services.exchanges.toobit import ToobitExchange
+from app.services.exchanges.binance import BinanceExchange
+from app.services.exchanges.binance_futures import BinanceUsdmExchange, BinanceCoinmExchange
 from app.utils.logger import logger
 
 
@@ -33,9 +35,13 @@ class ExchangeFactory:
         # 创建新实例
         if exchange_name == "toobit":
             exchange = ToobitExchange()
-        # 后续扩展：币安、OKX等
-        # elif exchange_name == "binance":
-        #     exchange = BinanceExchange()
+        elif exchange_name == "binance":
+            exchange = BinanceExchange()
+        elif exchange_name == "binance_usdm":
+            exchange = BinanceUsdmExchange()
+        elif exchange_name == "binance_coinm":
+            exchange = BinanceCoinmExchange()
+        # 后续扩展：OKX等
         # elif exchange_name == "okx":
         #     exchange = OKXExchange()
         else:
@@ -55,4 +61,4 @@ class ExchangeFactory:
         Returns:
             支持的交易所名称列表
         """
-        return ["toobit"]  # 后续扩展时更新此列表
+        return ["toobit", "binance", "binance_usdm", "binance_coinm"]  # 后续扩展时更新此列表

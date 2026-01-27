@@ -20,6 +20,21 @@ class Settings(BaseSettings):
     toobit_timeout: int = 10
     toobit_retry_count: int = 3
     
+    # 币安 API 配置（现货）
+    binance_base_url: str = "https://api.binance.com"
+    binance_timeout: int = 10
+    binance_retry_count: int = 3
+
+    # 币安 U 本位合约 API 配置（fapi）
+    binance_usdm_base_url: str = "https://fapi.binance.com"
+    binance_usdm_timeout: int = 10
+    binance_usdm_retry_count: int = 3
+
+    # 币安 币本位合约 API 配置（dapi）
+    binance_coinm_base_url: str = "https://dapi.binance.com"
+    binance_coinm_timeout: int = 10
+    binance_coinm_retry_count: int = 3
+    
     # 日志配置
     log_level: str = "INFO"
     log_file: str = "logs/app.log"
@@ -52,7 +67,22 @@ def get_exchange_config(exchange_name: str) -> Dict[str, Any]:
             "base_url": settings.toobit_base_url,
             "timeout": settings.toobit_timeout,
             "retry_count": settings.toobit_retry_count,
-        }
+        },
+        "binance": {
+            "base_url": settings.binance_base_url,
+            "timeout": settings.binance_timeout,
+            "retry_count": settings.binance_retry_count,
+        },
+        "binance_usdm": {
+            "base_url": settings.binance_usdm_base_url,
+            "timeout": settings.binance_usdm_timeout,
+            "retry_count": settings.binance_usdm_retry_count,
+        },
+        "binance_coinm": {
+            "base_url": settings.binance_coinm_base_url,
+            "timeout": settings.binance_coinm_timeout,
+            "retry_count": settings.binance_coinm_retry_count,
+        },
     }
     
     if exchange_name not in configs:

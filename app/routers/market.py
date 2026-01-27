@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("/symbols", response_model=ApiResponse[List[SymbolInfo]])
 async def get_symbols(
-    exchange: str = Query(default="toobit", description="交易所名称，默认toobit"),
+    exchange: str = Query(default="toobit", description="交易所：toobit | binance(现货) | binance_usdm(U本位合约) | binance_coinm(币本位合约)"),
     type: Optional[str] = Query(default=None, description="交易对类型：spot(现货) 或 contract(合约)，不传则返回全部"),
     db: Optional[AsyncSession] = Depends(get_db)
 ):
@@ -22,7 +22,7 @@ async def get_symbols(
     获取币对列表（带缓存功能）
     
     Args:
-        exchange: 交易所名称，默认toobit
+        exchange: 交易所名称。binance=现货，binance_usdm=U本位合约，binance_coinm=币本位合约
         type: 交易对类型，可选值：spot(现货)、contract(合约)，不传则返回全部
         db: 数据库会话（依赖注入，可能为None如果数据库未连接）
         
