@@ -1,0 +1,56 @@
+"""数据库模型"""
+from sqlalchemy import Column, String, Integer, Float, DateTime, Text, Index
+from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy.sql import func
+from app.database import Base
+import json
+
+
+class ExchangeSymbol(Base):
+    """交易所币对信息表"""
+    __tablename__ = "exchange_symbols"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
+    exchange = Column(String(50), nullable=False, comment="交易所名称")
+    symbol = Column(String(50), nullable=False, comment="交易对符号")
+    base_asset = Column(String(50), nullable=False, comment="基础资产")
+    quote_asset = Column(String(50), nullable=False, comment="计价资产")
+    status = Column(String(20), nullable=False, comment="交易状态")
+    type = Column(String(20), nullable=False, default="spot", comment="交易对类型：spot(现货) 或 contract(合约)")
+    base_asset_precision = Column(String(50), nullable=True, comment="基础资产精度")
+    quote_precision = Column(String(50), nullable=True, comment="计价资产精度")
+    min_price = Column(Float, nullable=True, comment="最小价格")
+    max_price = Column(Float, nullable=True, comment="最大价格")
+    tick_size = Column(Float, nullable=True, comment="价格精度")
+    min_qty = Column(Float, nullable=True, comment="最小数量")
+    max_qty = Column(Float, nullable=True, comment="最大数量")
+    step_size = Column(Float, nullable=True, comment="数量精度")
+    # raw_data字段保留但不使用，避免存储大量原始数据
+    raw_data = Column(LONGTEXT, nullable=True, comment="原始JSON数据（已废弃，不再使用）")
+    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    
+    # 创建联合唯一索引和普通索引
+    __table_args__ = (
+        Index("idx_exchange_symbol", "exchange", "symbol", "type", unique=True),
+        Index("idx_exchange_type", "exchange", "type"),
+        Index("idx_updated_at", "updated_at"),
+    )
+    
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "symbol": self.symbol,
+            "base_asset": self.base_asset,
+            "quote_asset": self.quote_asset,
+            "status": self.status,
+            "type": self.type,
+            "base_asset_precision": self.base_asset_precision,
+            "quote_precision": self.quote_precision,
+            "min_price": self.min_price,
+            "max_price": self.max_price,
+            "tick_size": self.tick_size,
+            "min_qty": self.min_qty,
+            "max_qty": self.max_qty,
+            "step_size": self.step_size,
+        }
