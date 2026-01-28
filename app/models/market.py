@@ -40,6 +40,25 @@ class SymbolInfo(BaseModel):
         }
 
 
+class ContractTicker24h(BaseModel):
+    """合约 24 小时价格变动（与 Toobit /quote/v1/contract/ticker/24hr 一致，供前端展示并由 wholeRealTime WS 更新）"""
+    t: Optional[int] = Field(None, description="时间戳（毫秒）")
+    a: Optional[str] = Field(None, description="最高卖价")
+    b: Optional[str] = Field(None, description="最高买价")
+    s: Optional[str] = Field(None, description="交易对，如 BTC-SWAP-USDT")
+    c: Optional[str] = Field(None, description="最新成交价")
+    o: Optional[str] = Field(None, description="开盘价")
+    h: Optional[str] = Field(None, description="最高价")
+    l: Optional[str] = Field(None, description="最低价")
+    v: Optional[str] = Field(None, description="成交量")
+    qv: Optional[str] = Field(None, description="成交额")
+    pc: Optional[str] = Field(None, description="24 小时价格变动")
+    pcp: Optional[str] = Field(None, description="24 小时价格变动百分比")
+
+    class Config:
+        extra = "allow"  # Toobit 可能多字段，不丢弃
+
+
 class KlineData(BaseModel):
     """K线数据"""
     timestamp: int = Field(..., description="时间戳（毫秒）")

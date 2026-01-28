@@ -3,10 +3,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
-from app.routers import market
+from app.routers import market, ws
 from app.database import init_db, close_db
 from app.utils.logger import logger
 from app.models.common import ApiResponse
+from app.services.ws.subscription import SubscriptionManager
+from app.services.ws.toobit_realtimes_client import ToobitRealtimesClient
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -28,6 +30,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(market.router, prefix="/api/v1", tags=["市场数据"])
+app.include_router(ws.router, prefix="/api/v1", tags=["WebSocket"])
 
 
 @app.exception_handler(Exception)
@@ -60,11 +63,27 @@ async def startup_event():
         logger.warning(f"数据库初始化失败（缓存功能将不可用）: {e}")
         logger.warning("请检查数据库配置和连接，服务将继续运行但无法使用缓存功能")
 
+    # WebSocket 行情：订阅管理 + Toobit 客户端（现货 realtimes / 合约 wholeRealTime）
+    sub_mgr = SubscriptionManager()
+    async def on_ticker(sym: str, topic: str, msg: dict):
+        await sub_mgr.broadcast(
+            "toobit", sym, topic,
+            {"event": topic, "exchange": "toobit", "symbol": sym, "data": msg.get("data"), "sendTime": msg.get("sendTime"), "f": msg.get("f")},
+        )
+    toobit_client = ToobitRealtimesClient(on_ticker=on_ticker)
+    toobit_client.start()
+    app.state.subscription_manager = sub_mgr
+    app.state.toobit_realtimes = toobit_client
+    logger.info("Toobit realtimes WS 客户端已启动")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭事件"""
     logger.info(f"{settings.app_name} 正在关闭...")
+    if hasattr(app.state, "toobit_realtimes") and app.state.toobit_realtimes is not None:
+        await app.state.toobit_realtimes.stop()
+        logger.info("Toobit realtimes WS 客户端已停止")
     await close_db()
 
 

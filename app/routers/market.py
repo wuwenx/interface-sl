@@ -2,8 +2,10 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
+from app.config import settings
 from app.models.common import ApiResponse
-from app.models.market import SymbolInfo
+from app.models.market import SymbolInfo, ContractTicker24h
 from app.services.exchange_factory import ExchangeFactory
 from app.services.cache_service import CacheService
 from app.database import get_db
@@ -87,6 +89,36 @@ async def get_symbols(
     except Exception as e:
         logger.error(f"获取币对列表失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取币对列表失败: {str(e)}")
+
+
+@router.get("/ticker/24hr", response_model=ApiResponse[List[ContractTicker24h]])
+async def get_contract_ticker_24hr(
+    exchange: str = Query(default="toobit", description="交易所，当前仅支持 toobit 合约 24hr"),
+):
+    """
+    获取合约 24 小时价格变动全量数据（Toobit 合约）
+    
+    前端可先调此接口拿到全量列表用于展示，再通过 WebSocket 订阅 topic=wholeRealTime 实时更新交易量、最新价等。
+    WS 推送格式与单条结构一致，按 data.s（或 symbol）合并到本地列表即可。
+    """
+    if exchange != "toobit":
+        raise HTTPException(status_code=400, detail="当前仅支持 exchange=toobit 的合约 24hr")
+    url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/contract/ticker/24hr"
+    try:
+        async with httpx.AsyncClient(timeout=settings.toobit_timeout) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            raw = r.json()
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"Toobit 合约 24hr 请求失败: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=502, detail="上游 Toobit 返回错误")
+    except Exception as e:
+        logger.warning(f"Toobit 合约 24hr 请求异常: {e}")
+        raise HTTPException(status_code=502, detail="请求 Toobit 失败")
+    if not isinstance(raw, list):
+        raw = [raw] if raw else []
+    out: List[ContractTicker24h] = [ContractTicker24h.model_validate(x) for x in raw if isinstance(x, dict)]
+    return ApiResponse.success(data=out, message="获取合约 24hr 成功")
 
 
 @router.get("/klines")
