@@ -40,6 +40,41 @@ class SymbolInfo(BaseModel):
         }
 
 
+class CcxtContractSymbol(BaseModel):
+    """CCXT 合约币对（统一 symbol + 交易所原生 id）"""
+    symbol: str = Field(..., description="CCXT 统一格式，如 BTC/USDT:USDT")
+    id: str = Field(..., description="交易所原生 symbol id，如 BTCUSDT 或 BTC-SWAP-USDT")
+
+
+class CcxtMarketInfo(BaseModel):
+    """CCXT fetch_markets 单条市场信息（含价格精度、最小交易量等元数据）"""
+    symbol: str = Field(..., description="CCXT 统一格式，如 BTC/USDT:USDT")
+    id: Optional[str] = Field(None, description="交易所原生 symbol id")
+    base: Optional[str] = Field(None, description="基础资产，如 BTC")
+    quote: Optional[str] = Field(None, description="计价资产，如 USDT")
+    type: Optional[str] = Field(None, description="类型：spot / future / swap")
+    active: Optional[bool] = Field(None, description="是否可交易")
+    # 精度：部分交易所为小数位数(int)，部分为最小步长(float)
+    precision: Optional[dict] = Field(None, description="精度，如 { amount, price }")
+    # 限制：最小/最大数量、价格、金额
+    limits: Optional[dict] = Field(None, description="限制，如 { amount: { min, max }, price: { min, max }, cost: { min, max } }")
+    contract: Optional[bool] = Field(None, description="是否合约")
+    contractSize: Optional[float] = Field(None, description="合约面值")
+    linear: Optional[bool] = Field(None, description="是否线性合约(U本位)")
+    inverse: Optional[bool] = Field(None, description="是否反向合约(币本位)")
+
+    class Config:
+        extra = "allow"  # 保留交易所其它元数据
+
+
+class PaginatedCcxtContracts(BaseModel):
+    """CCXT 合约列表分页结果"""
+    items: List["CcxtMarketInfo"] = Field(..., description="当前页列表")
+    total: int = Field(..., description="总条数")
+    page: int = Field(..., description="当前页码，从 1 开始")
+    page_size: int = Field(..., description="每页条数")
+
+
 class ContractTicker24h(BaseModel):
     """合约 24 小时价格变动（与 Toobit /quote/v1/contract/ticker/24hr 一致，供前端展示并由 wholeRealTime WS 更新）"""
     t: Optional[int] = Field(None, description="时间戳（毫秒）")

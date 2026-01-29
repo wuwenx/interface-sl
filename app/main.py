@@ -9,6 +9,7 @@ from app.utils.logger import logger
 from app.models.common import ApiResponse
 from app.services.ws.subscription import SubscriptionManager
 from app.services.ws.toobit_realtimes_client import ToobitRealtimesClient
+from app.services.ws.ccxt_ticker_manager import CcxtTickerManager
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -74,7 +75,9 @@ async def startup_event():
     toobit_client.start()
     app.state.subscription_manager = sub_mgr
     app.state.toobit_realtimes = toobit_client
+    app.state.ccxt_ticker_manager = CcxtTickerManager()
     logger.info("Toobit realtimes WS 客户端已启动")
+    logger.info("CCXT watch_tickers WS 已就绪: /api/v1/ws/ccxt")
 
 
 @app.on_event("shutdown")

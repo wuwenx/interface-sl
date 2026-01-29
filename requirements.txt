@@ -11,3 +11,4 @@ pymysql==1.1.0
 greenlet==3.0.1
 websockets==12.0
 certifi>=2024.2.0
+ccxt>=4.0.0
