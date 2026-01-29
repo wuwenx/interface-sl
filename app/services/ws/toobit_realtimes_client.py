@@ -16,7 +16,10 @@ from app.config import settings
 from app.utils.logger import logger
 
 TOOBIT_WS_URL = getattr(settings, "toobit_ws_url", "wss://stream.toobit.com/quote/ws/v1")
-PING_INTERVAL = 60  # 文档要求客户端定期发 ping，服务端 5 分钟无 ping 会断连
+# 心跳：按 Toobit 文档 https://api-docs.toobit.com/zh/api/spot-websocket-market-data.html#%E5%BF%83%E8%B7%B3
+# 客户端需定期发送 ping 帧 {"ping": timestamp}，服务端回复 pong 帧，否则 5 分钟内断连
+PING_INTERVAL = getattr(settings, "toobit_ws_ping_interval", 60)
+FIRST_PING_DELAY = 15  # 连接后 15 秒发首包 ping，避免服务端空闲超时
 RECONNECT_DELAY = 5
 
 # 支持的 topic：现货 realtimes，合约 wholeRealTime
@@ -137,6 +140,7 @@ class ToobitRealtimesClient:
                     ping_interval=None,
                     ping_timeout=None,
                     close_timeout=5,
+                    max_size=None,  # 不限制消息大小，避免 wholeRealTime 全量推送被截断
                     ssl=ssl_arg,
                 ) as ws:
                     self._ws = ws
@@ -161,7 +165,8 @@ class ToobitRealtimesClient:
                                 msg = json.loads(raw) if isinstance(raw, str) else raw
                             except Exception:
                                 continue
-                            if "pong" in msg:
+                            # 处理 Toobit 心跳 pong 响应：{"pong": timestamp}
+                            if isinstance(msg, dict) and "pong" in msg:
                                 continue
                             msg_topic = msg.get("topic")
                             if msg_topic in TOOBIT_TOPICS and "data" in msg:
@@ -182,6 +187,9 @@ class ToobitRealtimesClient:
                             pass
             except asyncio.CancelledError:
                 break
+            except websockets.exceptions.ConnectionClosed as e:
+                reason = getattr(e, "reason", None) or getattr(e, "code", None) or str(e)
+                logger.warning(f"Toobit WS 连接异常断开: {reason}，{RECONNECT_DELAY} 秒后重连")
             except Exception as e:
                 logger.warning(f"Toobit WS 断开或异常: {e}")
             self._ws = None
@@ -189,13 +197,22 @@ class ToobitRealtimesClient:
             await asyncio.sleep(RECONNECT_DELAY)
 
     async def _ping_loop(self, ws: Any) -> None:
-        """每隔一段时间向 Toobit 发 ping，避免 5 分钟被踢。"""
+        """
+        按 Toobit 文档发送心跳 ping 帧，服务端回复 pong，否则 5 分钟内断连。
+        请求格式: {"ping": 1535975085052}
+        响应格式: {"pong": 1535975085052}
+        首包 ping 在连接后 15 秒发送，之后每 PING_INTERVAL 秒发送，避免服务端空闲超时。
+        """
+        first = True
         while True:
-            await asyncio.sleep(PING_INTERVAL)
+            delay = FIRST_PING_DELAY if first else PING_INTERVAL
+            await asyncio.sleep(delay)
+            first = False
             if not ws.open:
                 return
             try:
-                await ws.send(json.dumps({"ping": int(time.time() * 1000)}))
+                payload = {"ping": int(time.time() * 1000)}
+                await ws.send(json.dumps(payload))
             except Exception:
                 return
 

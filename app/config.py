@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Toobit WebSocket 行情推送 baseurl: wss://stream.toobit.com，路径 /quote/ws/v1
     toobit_ws_url: str = "wss://stream.toobit.com/quote/ws/v1"
     toobit_ws_ssl_verify: bool = True  # 设为 False 可跳过 SSL 校验（仅限本地/开发环境）
+    toobit_ws_ping_interval: int = 60  # 心跳 ping 间隔（秒），服务端 5 分钟无 ping 会断连
     
     # 币安 API 配置（现货）
     binance_base_url: str = "https://api.binance.com"

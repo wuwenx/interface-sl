@@ -164,7 +164,11 @@ class ToobitExchange(BaseExchange):
                 # 只处理状态为TRADING的合约
                 if contract_data.get("status") != "TRADING":
                     continue
-                
+                # 过滤掉 TBV_ 或 TBV- 开头的合约（如 TBV-ETH-SWAP-TBV-USDT）
+                symbol_raw = contract_data.get("symbol", "")
+                if symbol_raw.startswith("TBV_") or symbol_raw.startswith("TBV-"):
+                    continue
+
                 symbol_info = self._parse_symbol_data(contract_data, "contract")
                 symbol_list.append(symbol_info)
             

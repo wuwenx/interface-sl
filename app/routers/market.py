@@ -92,33 +92,55 @@ async def get_symbols(
 
 
 @router.get("/ticker/24hr", response_model=ApiResponse[List[ContractTicker24h]])
-async def get_contract_ticker_24hr(
-    exchange: str = Query(default="toobit", description="交易所，当前仅支持 toobit 合约 24hr"),
+async def get_ticker_24hr(
+    exchange: str = Query(default="toobit", description="交易所，当前仅支持 toobit"),
+    type: str = Query(default="contract", description="类型：spot(现货) 或 contract(合约)"),
+    symbol: Optional[str] = Query(default=None, description="交易对，仅现货支持；不传则返回全量"),
 ):
     """
-    获取合约 24 小时价格变动全量数据（Toobit 合约）
+    获取 24 小时价格变动数据（Toobit 现货 / 合约）
+    
+    - type=spot: 调用 /quote/v1/ticker/24hr，可选 symbol 过滤
+    - type=contract: 调用 /quote/v1/contract/ticker/24hr，全量
     
     前端可先调此接口拿到全量列表用于展示，再通过 WebSocket 订阅 topic=wholeRealTime 实时更新交易量、最新价等。
     WS 推送格式与单条结构一致，按 data.s（或 symbol）合并到本地列表即可。
     """
     if exchange != "toobit":
-        raise HTTPException(status_code=400, detail="当前仅支持 exchange=toobit 的合约 24hr")
-    url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/contract/ticker/24hr"
+        raise HTTPException(status_code=400, detail="当前仅支持 exchange=toobit")
+    if type not in ("spot", "contract"):
+        raise HTTPException(status_code=400, detail="type 必须是 spot 或 contract")
+
+    if type == "spot":
+        url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/ticker/24hr"
+        params = {"symbol": symbol} if symbol else {}
+    else:
+        if symbol:
+            raise HTTPException(status_code=400, detail="合约 24hr 不支持 symbol 参数")
+        url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/contract/ticker/24hr"
+        params = {}
+
     try:
         async with httpx.AsyncClient(timeout=settings.toobit_timeout) as client:
-            r = await client.get(url)
+            r = await client.get(url, params=params)
             r.raise_for_status()
             raw = r.json()
     except httpx.HTTPStatusError as e:
-        logger.warning(f"Toobit 合约 24hr 请求失败: {e.response.status_code} {e.response.text}")
+        logger.warning(f"Toobit {type} 24hr 请求失败: {e.response.status_code} {e.response.text}")
         raise HTTPException(status_code=502, detail="上游 Toobit 返回错误")
     except Exception as e:
-        logger.warning(f"Toobit 合约 24hr 请求异常: {e}")
+        logger.warning(f"Toobit {type} 24hr 请求异常: {e}")
         raise HTTPException(status_code=502, detail="请求 Toobit 失败")
+
     if not isinstance(raw, list):
         raw = [raw] if raw else []
-    out: List[ContractTicker24h] = [ContractTicker24h.model_validate(x) for x in raw if isinstance(x, dict)]
-    return ApiResponse.success(data=out, message="获取合约 24hr 成功")
+    # 合约 24hr 过滤掉 TBV_ / TBV- 开头的交易对（与 exchangeInfo 过滤一致）
+    def _skip_tbv(item: dict) -> bool:
+        s = (item.get("s") or "").strip()
+        return s.startswith("TBV_") or s.startswith("TBV-")
+    items = [x for x in raw if isinstance(x, dict) and (type != "contract" or not _skip_tbv(x))]
+    out: List[ContractTicker24h] = [ContractTicker24h.model_validate(x) for x in items]
+    return ApiResponse.success(data=out, message=f"获取{type} 24hr 成功")
 
 
 @router.get("/klines")

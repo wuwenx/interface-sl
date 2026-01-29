@@ -110,6 +110,7 @@ CACHE_TTL=3600  # 缓存过期时间（秒），默认1小时
 ### 3. 启动服务
 
 ```bash
+source venv/bin/activate
 # 使用uvicorn启动
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
