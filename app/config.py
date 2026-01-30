@@ -1,6 +1,24 @@
 """配置管理模块"""
 from pydantic_settings import BaseSettings
-from typing import Dict, Any
+from typing import Dict, Any, List
+import json
+
+
+def _default_news_sources() -> List[Dict[str, Any]]:
+    """默认新闻数据源：2 个（API + RSS）"""
+    return [
+        {
+            "type": "api",
+            "name": "CryptoCompare",
+            "url": "https://min-api.cryptocompare.com/data/v2/news/?lang=EN",
+            "response_path": "Data",
+        },
+        {
+            "type": "rss",
+            "name": "CoinDesk",
+            "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+        },
+    ]
 
 
 class Settings(BaseSettings):
@@ -53,6 +71,10 @@ class Settings(BaseSettings):
     
     # 缓存配置
     cache_ttl: int = 86400  # 缓存过期时间（秒），默认1天（24小时）
+
+    # 新闻快讯数据源（JSON 数组，可覆盖默认 2 个）
+    # 每项: {"type":"api","name":"xxx","url":"...","response_path":"Data"} 或 {"type":"rss","name":"xxx","url":"..."}
+    news_sources: str = ""
     
     class Config:
         env_file = ".env"
@@ -62,6 +84,16 @@ class Settings(BaseSettings):
 
 # 全局配置实例
 settings = Settings()
+
+
+def get_news_sources() -> List[Dict[str, Any]]:
+    """获取新闻数据源列表（支持 .env 中 NEWS_SOURCES JSON 覆盖默认）"""
+    if settings.news_sources and settings.news_sources.strip():
+        try:
+            return json.loads(settings.news_sources)
+        except json.JSONDecodeError:
+            pass
+    return _default_news_sources()
 
 
 def get_exchange_config(exchange_name: str) -> Dict[str, Any]:

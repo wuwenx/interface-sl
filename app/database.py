@@ -96,6 +96,35 @@ async def init_db():
         raise
 
 
+async def migrate_news_zh_columns():
+    """
+    若 news_articles 表存在但缺少中文列，则添加 title_zh/summary_zh/content_zh。
+    避免 Unknown column 'news_articles.title_zh' 报错。
+    """
+    if engine is None:
+        return
+    from sqlalchemy import text
+    try:
+        async with engine.begin() as conn:
+            try:
+                r = await conn.execute(text("SHOW COLUMNS FROM news_articles LIKE 'title_zh'"))
+                row = r.fetchone()
+            except Exception:
+                # 表不存在
+                return
+            if row is None:
+                await conn.execute(text(
+                    "ALTER TABLE news_articles "
+                    "ADD COLUMN title_zh varchar(512) DEFAULT NULL COMMENT '标题中文', "
+                    "ADD COLUMN summary_zh text DEFAULT NULL COMMENT '摘要中文', "
+                    "ADD COLUMN content_zh longtext DEFAULT NULL COMMENT '正文中文'"
+                ))
+                logger.info("news_articles 已添加中文列: title_zh, summary_zh, content_zh")
+    except Exception as e:
+        # 列已存在等会报错，忽略
+        logger.debug(f"新闻表迁移跳过或失败: {e}")
+
+
 async def close_db():
     """关闭数据库连接"""
     global engine

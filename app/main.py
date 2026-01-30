@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
-from app.routers import market, ws
+from app.routers import market, ws, news
 from app.database import init_db, close_db
 from app.utils.logger import logger
 from app.models.common import ApiResponse
@@ -32,6 +32,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(market.router, prefix="/api/v1", tags=["市场数据"])
 app.include_router(ws.router, prefix="/api/v1", tags=["WebSocket"])
+app.include_router(news.router, prefix="/api/v1", tags=["新闻快讯"])
 
 
 @app.exception_handler(Exception)
@@ -56,9 +57,10 @@ async def startup_event():
     
     # 初始化数据库（可选，失败不影响服务启动）
     try:
-        from app.database import init_database_engine, init_db
+        from app.database import init_database_engine, init_db, migrate_news_zh_columns
         init_database_engine()
         await init_db()
+        await migrate_news_zh_columns()
         logger.info("数据库连接成功，缓存功能已启用")
     except Exception as e:
         logger.warning(f"数据库初始化失败（缓存功能将不可用）: {e}")
@@ -78,6 +80,23 @@ async def startup_event():
     app.state.ccxt_ticker_manager = CcxtTickerManager()
     logger.info("Toobit realtimes WS 客户端已启动")
     logger.info("CCXT watch_tickers WS 已就绪: /api/v1/ws/ccxt")
+
+    # 新闻快讯：启动时拉取一次，便于首屏有数据
+    try:
+        from app.database import AsyncSessionLocal
+        from app.services.news_service import fetch_all_sources_and_save
+        async def _first_news_fetch():
+            try:
+                async with AsyncSessionLocal() as session:
+                    n = await fetch_all_sources_and_save(session)
+                    await session.commit()
+                    logger.info(f"新闻快讯首次拉取完成，写入 {n} 条")
+            except Exception as e:
+                logger.warning(f"新闻快讯首次拉取失败: {e}")
+        import asyncio
+        asyncio.create_task(_first_news_fetch())
+    except Exception as e:
+        logger.warning(f"新闻快讯启动拉取未执行: {e}")
 
 
 @app.on_event("shutdown")

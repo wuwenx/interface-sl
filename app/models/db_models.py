@@ -22,6 +22,29 @@ class CcxtMarketsCache(Base):
     )
 
 
+class NewsArticle(Base):
+    """新闻快讯表（多数据源抓取后统一存储，支持中文翻译）"""
+    __tablename__ = "news_articles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
+    source_name = Column(String(64), nullable=False, comment="数据源名称，如 CryptoCompare、CoinDesk")
+    title = Column(String(512), nullable=False, comment="标题")
+    summary = Column(Text, nullable=True, comment="摘要")
+    content = Column(LONGTEXT, nullable=True, comment="正文")
+    title_zh = Column(String(512), nullable=True, comment="标题中文")
+    summary_zh = Column(Text, nullable=True, comment="摘要中文")
+    content_zh = Column(LONGTEXT, nullable=True, comment="正文中文")
+    url = Column(String(1024), nullable=False, comment="原文链接")
+    published_at = Column(DateTime, nullable=True, comment="源站发布时间")
+    created_at = Column(DateTime, server_default=func.now(), comment="入库时间")
+
+    __table_args__ = (
+        Index("idx_news_url", "url", unique=True),
+        Index("idx_news_published", "published_at"),
+        Index("idx_news_created", "created_at"),
+    )
+
+
 class ExchangeSymbol(Base):
     """交易所币对信息表"""
     __tablename__ = "exchange_symbols"
