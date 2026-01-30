@@ -31,7 +31,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(market.router, prefix="/api/v1", tags=["市场数据"])
-app.include_router(ws.router, prefix="/api/v1", tags=["WebSocket"])
+app.include_router(ws.router, prefix="", tags=["WebSocket"])
 app.include_router(news.router, prefix="/api/v1", tags=["新闻快讯"])
 
 
