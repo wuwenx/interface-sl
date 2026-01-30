@@ -6,6 +6,22 @@ from app.database import Base
 import json
 
 
+class CcxtMarketsCache(Base):
+    """CCXT 市场列表缓存（按 exchange + market_type 存简要 JSON，减少重复请求 API）"""
+    __tablename__ = "ccxt_markets_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
+    exchange = Column(String(50), nullable=False, comment="交易所名称，如 binance_usdm, toobit")
+    market_type = Column(String(20), nullable=False, comment="市场类型：spot 或 contract")
+    data = Column(LONGTEXT, nullable=False, comment="简要市场列表 JSON 数组")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+
+    __table_args__ = (
+        Index("idx_ccxt_cache_exchange_type", "exchange", "market_type", unique=True),
+        Index("idx_ccxt_cache_updated", "updated_at"),
+    )
+
+
 class ExchangeSymbol(Base):
     """交易所币对信息表"""
     __tablename__ = "exchange_symbols"

@@ -67,9 +67,19 @@ class CcxtMarketInfo(BaseModel):
         extra = "allow"  # 保留交易所其它元数据
 
 
+class CcxtMarketSimple(BaseModel):
+    """CCXT 市场简要信息（仅 symbol、id、base、quote、type、precision 供前端）"""
+    symbol: str = Field(..., description="CCXT 统一格式，如 BTC/USDT:USDT")
+    id: str = Field(..., description="交易所原生 symbol id，如 BTC-SWAP-USDT")
+    base: str = Field(..., description="基础资产，如 BTC")
+    quote: str = Field(..., description="计价资产，如 USDT")
+    type: str = Field(..., description="类型：spot / future / swap")
+    precision: dict = Field(..., description="精度，仅 amount、price，如 { \"amount\": 0.001, \"price\": 0.1 }")
+
+
 class PaginatedCcxtContracts(BaseModel):
     """CCXT 合约列表分页结果"""
-    items: List["CcxtMarketInfo"] = Field(..., description="当前页列表")
+    items: List[CcxtMarketSimple] = Field(..., description="当前页列表（简要字段）")
     total: int = Field(..., description="总条数")
     page: int = Field(..., description="当前页码，从 1 开始")
     page_size: int = Field(..., description="每页条数")

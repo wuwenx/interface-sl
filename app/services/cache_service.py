@@ -62,7 +62,10 @@ class CacheService:
             
             # 无数据或空列表：视为“数据库没有可用数据”，返回 None，由调用方调 API 并写库
             if not symbols:
-                logger.info(f"数据库无有效数据，需调外部API并写库: exchange={exchange}, type={symbol_type}")
+                logger.info(
+                    f"数据库无有效数据，需调外部API并写库: exchange={exchange}, type={symbol_type} "
+                    f"（可能原因：该 exchange+type 无缓存、或仅有 contract/spot 另一种类型、或缓存已过期）"
+                )
                 return None
             
             # 转换为SymbolInfo对象

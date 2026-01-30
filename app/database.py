@@ -83,6 +83,7 @@ async def get_db():
 
 async def init_db():
     """初始化数据库，创建所有表"""
+    from app.models import db_models  # noqa: F401  # 确保 CcxtMarketsCache 等表已注册
     if engine is None:
         init_database_engine()
     

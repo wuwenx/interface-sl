@@ -6,9 +6,10 @@ import httpx
 import ccxt.async_support as ccxt
 from app.config import settings
 from app.models.common import ApiResponse
-from app.models.market import SymbolInfo, ContractTicker24h, CcxtContractSymbol, CcxtMarketInfo, PaginatedCcxtContracts, OrderBook, OrderBookEntry
+from app.models.market import SymbolInfo, ContractTicker24h, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry
 from app.services.exchange_factory import ExchangeFactory
 from app.services.cache_service import CacheService
+from app.services.ccxt_markets_cache_service import CcxtMarketsCacheService, build_simple_market
 from app.database import get_db
 from app.utils.logger import logger
 
@@ -121,10 +122,11 @@ async def get_contract_symbols_ccxt(
     ),
     page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(default=10, ge=1, le=100, description="每页条数，默认 10"),
+    db: Optional[AsyncSession] = Depends(get_db),
 ):
     """
-    使用 CCXT fetch_markets 获取交易对列表（含价格精度、最小交易量等详细元数据），支持现货/合约与分页。
-    market_type=spot 时返回现货，=contract 时返回合约；Toobit 合约会过滤掉 TBV_/TBV- 开头。
+    获取交易对列表（简要字段：symbol、id、base、quote、type、precision），支持现货/合约与分页。
+    优先从数据库缓存读取，无缓存或过期时调 CCXT API 并写入缓存；Toobit 合约会过滤 TBV_/TBV-。
     """
     if market_type not in ("spot", "contract"):
         raise HTTPException(status_code=400, detail="market_type 必须是 spot 或 contract")
@@ -141,42 +143,65 @@ async def get_contract_symbols_ccxt(
 
     result: Dict[str, PaginatedCcxtContracts] = {}
     for our_name in names:
-        ccxt_id = exchange_map[our_name]
-        try:
-            ex = getattr(ccxt, ccxt_id)({"enableRateLimit": True})
+        simple_list: List[dict] = []
+        if db is not None:
             try:
-                await ex.load_markets()
-                markets_list = []
-                for sym, m in ex.markets.items():
-                    if not m.get("active", True):
-                        continue
-                    mt = (m.get("type") or "").lower()
-                    if market_type == "spot":
-                        if mt != "spot" or m.get("contract"):
+                cache_svc = CcxtMarketsCacheService(db)
+                simple_list = await cache_svc.get_markets(our_name, market_type) or []
+            except Exception as e:
+                logger.warning(f"CCXT 缓存读取失败 {our_name}: {e}")
+                simple_list = []
+
+        if not simple_list:
+            ccxt_id = exchange_map[our_name]
+            try:
+                ex = getattr(ccxt, ccxt_id)({"enableRateLimit": True})
+                try:
+                    await ex.load_markets()
+                    for sym, m in ex.markets.items():
+                        if not m.get("active", True):
                             continue
-                    else:
-                        if not m.get("contract") and mt not in ("future", "swap"):
-                            continue
-                        native_id = m.get("id") or sym
-                        if our_name == "toobit":
-                            if (native_id or "").startswith("TBV_") or (native_id or "").startswith("TBV-"):
+                        mt = (m.get("type") or "").lower()
+                        if market_type == "spot":
+                            if mt != "spot" or m.get("contract"):
                                 continue
-                    markets_list.append(CcxtMarketInfo.model_validate(m))
-                total = len(markets_list)
-                start = (page - 1) * page_size
-                items = markets_list[start : start + page_size]
-                result[our_name] = PaginatedCcxtContracts(
-                    items=items,
-                    total=total,
-                    page=page,
-                    page_size=page_size,
-                )
-                logger.info(f"CCXT fetch_markets {market_type}: {our_name} 共 {total} 个，第 {page} 页 {len(items)} 条")
-            finally:
-                await ex.close()
-        except Exception as e:
-            logger.warning(f"CCXT fetch_markets 失败 {our_name}: {e}")
-            raise HTTPException(status_code=502, detail=f"获取 {our_name} 列表失败: {e}")
+                        else:
+                            if not m.get("contract") and mt not in ("future", "swap"):
+                                continue
+                            native_id = m.get("id") or sym
+                            if our_name == "toobit":
+                                if (native_id or "").startswith("TBV_") or (native_id or "").startswith("TBV-"):
+                                    continue
+                        one = build_simple_market(m)
+                        if one:
+                            simple_list.append(one)
+                    if simple_list:
+                        if db is not None:
+                            try:
+                                cache_svc = CcxtMarketsCacheService(db)
+                                await cache_svc.save_markets(our_name, market_type, simple_list)
+                            except Exception as e:
+                                logger.exception(f"CCXT 缓存写入失败 {our_name}: {e}")
+                                raise HTTPException(status_code=500, detail=f"写入缓存失败: {e}")
+                        else:
+                            logger.warning("数据库未连接，CCXT 市场列表未写入缓存，请检查 DB 配置")
+                finally:
+                    await ex.close()
+            except Exception as e:
+                logger.warning(f"CCXT fetch_markets 失败 {our_name}: {e}")
+                raise HTTPException(status_code=502, detail=f"获取 {our_name} 列表失败: {e}")
+
+        total = len(simple_list)
+        start = (page - 1) * page_size
+        slice_raw = simple_list[start : start + page_size]
+        items = [CcxtMarketSimple(**x) for x in slice_raw]
+        result[our_name] = PaginatedCcxtContracts(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        logger.info(f"CCXT {market_type}: {our_name} 共 {total} 个，第 {page} 页 {len(items)} 条")
 
     return ApiResponse.success(data=result, message="获取交易对列表成功")
 
