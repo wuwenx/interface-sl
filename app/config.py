@@ -62,10 +62,10 @@ class Settings(BaseSettings):
     log_file: str = "logs/app.log"
     
     # 数据库配置
-    db_host: str = "localhost"
+    db_host: str = "10.246.2.52"
     db_port: int = 3306
     db_user: str = "root"
-    db_password: str = ""
+    db_password: str = "Stjiod423gto1r3!"
     db_name: str = "exchange_api"
     db_charset: str = "utf8mb4"
     
