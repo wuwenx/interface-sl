@@ -8,6 +8,7 @@ from typing import Dict, Set, Tuple, List, Any, Optional
 
 from fastapi import WebSocket
 
+from app.config import settings
 from app.utils.logger import logger
 
 # 与 market 路由一致：本站 exchange 名 -> CCXT id（现货/合约共用）
@@ -172,7 +173,7 @@ class CcxtTickerManager:
         """加载该交易所市场并按 market_type(spot/contract) 过滤出 symbol 列表。"""
         import ccxt.async_support as ccxt
         ex_class = getattr(ccxt, ccxt_id)
-        ex = ex_class({"enableRateLimit": True})
+        ex = ex_class({"enableRateLimit": True, "timeout": settings.ccxt_timeout})
         try:
             await ex.load_markets()
             out = []
@@ -201,7 +202,7 @@ class CcxtTickerManager:
         """使用 ccxt.pro watch_tickers 推送。"""
         import ccxt.pro as ccxtpro
         ex_class = getattr(ccxtpro, ccxt_id)
-        ex = ex_class({"enableRateLimit": True})
+        ex = ex_class({"enableRateLimit": True, "timeout": settings.ccxt_timeout})
         try:
             while True:
                 try:
@@ -222,7 +223,7 @@ class CcxtTickerManager:
         """无 ccxt.pro 时使用 REST fetch_tickers 轮询并推送。全市场时传空列表调 fetch_tickers() 取全量。"""
         import ccxt.async_support as ccxt
         ex_class = getattr(ccxt, ccxt_id)
-        ex = ex_class({"enableRateLimit": True})
+        ex = ex_class({"enableRateLimit": True, "timeout": settings.ccxt_timeout})
         try:
             while True:
                 try:

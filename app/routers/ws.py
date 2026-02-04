@@ -1,12 +1,13 @@
 """
 WebSocket 行情推送路由
-- /ws: Toobit 行情（realtimes / wholeRealTime）
-- /ws/ccxt: CCXT watch_tickers 多币种实时价格（binance / binance_usdm / toobit）
+- /ws: CCXT watch_tickers 多币种实时价格（binance / binance_usdm / toobit）
+- /ws/klines: CCXT watch_ohlcv 实时 K 线推送
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.services.ws.toobit_realtimes_client import ToobitRealtimesClient
 from app.services.ws.ccxt_ticker_manager import CcxtTickerManager, CCXT_WS_EXCHANGES
+from app.services.ws.ccxt_kline_manager import CcxtKlineManager
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -152,5 +153,69 @@ async def ws_ccxt_tickers(websocket: WebSocket) -> None:
         logger.info("WebSocket CCXT 客户端断开")
     except Exception as e:
         logger.warning(f"WebSocket CCXT 异常: {e}")
+    finally:
+        await manager.remove_connection(websocket)
+
+
+@router.websocket("/ws/kline")
+@router.websocket("/ws/klines")
+async def ws_ccxt_klines(websocket: WebSocket) -> None:
+    """
+    CCXT watch_ohlcv：实时 K 线推送，支持多交易所、多币对、多周期。
+
+    连接后发送 JSON：
+    - 订阅: {"event": "sub", "exchange": "binance_usdm", "symbol": "BTC/USDT:USDT", "interval": "1m"}
+    - 取消: {"event": "cancel", "exchange": "binance_usdm", "symbol": "BTC/USDT:USDT", "interval": "1m"}
+
+    参数说明：
+    - exchange: binance(现货)、binance_usdm(合约)、toobit
+    - symbol: CCXT 格式交易对，现货如 BTC/USDT，合约如 BTC/USDT:USDT
+    - interval: K 线周期，如 1m, 5m, 15m, 1h, 4h, 1d
+
+    服务端推送: {"event": "kline", "exchange": "...", "symbol": "...", "interval": "...", "source": "ws|poll", "data": { timestamp, open, high, low, close, volume, ... }, "ts": ...}
+    """
+    await websocket.accept()
+    app = websocket.app
+    manager: CcxtKlineManager = getattr(app.state, "ccxt_kline_manager", None)
+    if not manager:
+        await websocket.close(code=1011)
+        return
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = __import__("json").loads(raw)
+            except Exception:
+                continue
+            ev = (msg.get("event") or "").strip().lower()
+            exchange = (msg.get("exchange") or "").strip().lower()
+            symbol = (msg.get("symbol") or "").strip()
+            interval = (msg.get("interval") or "1h").strip().lower()
+            if exchange not in CCXT_WS_EXCHANGES:
+                await websocket.send_json({"event": "error", "message": f"不支持的交易所: {exchange}"})
+                continue
+            if not symbol:
+                await websocket.send_json({"event": "error", "message": "symbol 不能为空"})
+                continue
+            if ev == "sub":
+                await manager.add(websocket, exchange, symbol, interval)
+                await websocket.send_json({
+                    "event": "subscribed",
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "interval": interval,
+                })
+            elif ev == "cancel":
+                await manager.remove(websocket, exchange, symbol, interval)
+                await websocket.send_json({
+                    "event": "cancelled",
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "interval": interval,
+                })
+    except WebSocketDisconnect:
+        logger.info("WebSocket CCXT K线客户端断开")
+    except Exception as e:
+        logger.warning(f"WebSocket CCXT K线异常: {e}")
     finally:
         await manager.remove_connection(websocket)

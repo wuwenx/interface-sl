@@ -10,6 +10,7 @@ from app.models.common import ApiResponse
 from app.services.ws.subscription import SubscriptionManager
 from app.services.ws.toobit_realtimes_client import ToobitRealtimesClient
 from app.services.ws.ccxt_ticker_manager import CcxtTickerManager
+from app.services.ws.ccxt_kline_manager import CcxtKlineManager
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -78,8 +79,10 @@ async def startup_event():
     app.state.subscription_manager = sub_mgr
     app.state.toobit_realtimes = toobit_client
     app.state.ccxt_ticker_manager = CcxtTickerManager()
+    app.state.ccxt_kline_manager = CcxtKlineManager()
     logger.info("Toobit realtimes WS 客户端已启动")
-    logger.info("CCXT watch_tickers WS 已就绪: /api/v1/ws/ccxt")
+    logger.info("CCXT watch_tickers WS 已就绪: /ws")
+    logger.info("CCXT watch_ohlcv K线 WS 已就绪: /ws/klines")
 
     # 新闻快讯：启动时拉取一次，便于首屏有数据
     try:

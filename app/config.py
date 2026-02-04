@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # 缓存配置
     cache_ttl: int = 86400  # 缓存过期时间（秒），默认1天（24小时）
 
+    # CCXT 请求超时（毫秒），网络较慢时可增大，默认 30 秒
+    ccxt_timeout: int = 30000
+
     # 新闻快讯数据源（JSON 数组，可覆盖默认 2 个）
     # 每项: {"type":"api","name":"xxx","url":"...","response_path":"Data"} 或 {"type":"rss","name":"xxx","url":"..."}
     news_sources: str = ""

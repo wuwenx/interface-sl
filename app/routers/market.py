@@ -6,7 +6,7 @@ import httpx
 import ccxt.async_support as ccxt
 from app.config import settings
 from app.models.common import ApiResponse
-from app.models.market import SymbolInfo, ContractTicker24h, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry
+from app.models.market import SymbolInfo, ContractTicker24h, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry, KlineData
 from app.services.exchange_factory import ExchangeFactory
 from app.services.cache_service import CacheService
 from app.services.ccxt_markets_cache_service import CcxtMarketsCacheService, build_simple_market
@@ -155,7 +155,10 @@ async def get_contract_symbols_ccxt(
         if not simple_list:
             ccxt_id = exchange_map[our_name]
             try:
-                ex = getattr(ccxt, ccxt_id)({"enableRateLimit": True})
+                ex = getattr(ccxt, ccxt_id)({
+                    "enableRateLimit": True,
+                    "timeout": settings.ccxt_timeout,
+                })
                 try:
                     await ex.load_markets()
                     for sym, m in ex.markets.items():
@@ -189,6 +192,12 @@ async def get_contract_symbols_ccxt(
                     await ex.close()
             except Exception as e:
                 logger.warning(f"CCXT fetch_markets 失败 {our_name}: {e}")
+                err_msg = str(e)
+                if "Timeout" in err_msg or "RequestTimeout" in type(e).__name__:
+                    raise HTTPException(
+                        status_code=504,
+                        detail=f"{our_name} API 响应超时，请稍后重试或检查网络",
+                    )
                 raise HTTPException(status_code=502, detail=f"获取 {our_name} 列表失败: {e}")
 
         total = len(simple_list)
@@ -258,17 +267,84 @@ async def get_ticker_24hr(
     return ApiResponse.success(data=out, message=f"获取{type} 24hr 成功")
 
 
-@router.get("/klines")
+@router.get("/klines", response_model=ApiResponse[List[KlineData]])
 async def get_klines(
-    symbol: str = Query(..., description="交易对符号，如BTC_USDT"),
-    interval: str = Query(..., description="K线周期，如1h"),
-    limit: int = Query(default=100, description="返回数据条数"),
-    exchange: str = Query(default="toobit", description="交易所名称，默认toobit")
+    exchange: str = Query(
+        default="toobit",
+        description="交易所：binance(现货) | binance_usdm(U本位合约) | toobit",
+    ),
+    symbol: str = Query(
+        ...,
+        description="CCXT 统一交易对，现货如 BTC/USDT，合约如 BTC/USDT:USDT",
+    ),
+    interval: str = Query(
+        default="1h",
+        description="K线周期：1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M",
+    ),
+    limit: int = Query(default=100, ge=1, le=1000, description="返回数据条数，默认 100，最大 1000"),
+    since: Optional[int] = Query(default=None, description="起始时间戳（毫秒），不传则返回最近 limit 条"),
 ):
     """
-    获取K线数据（暂未实现）
+    使用 CCXT fetch_ohlcv 获取 K 线数据。
+    支持币安现货、币安 U 本位合约、Toobit；symbol 使用 CCXT 统一格式。
     """
-    raise HTTPException(status_code=501, detail="K线接口暂未实现")
+    ex_name = exchange.strip().lower()
+    if ex_name not in CCXT_EXCHANGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的交易所: {exchange}，可选: {list(CCXT_EXCHANGES.keys())}",
+        )
+    ccxt_id = CCXT_EXCHANGES[ex_name]
+    ex = getattr(ccxt, ccxt_id)({
+        "enableRateLimit": True,
+        "timeout": settings.ccxt_timeout,
+    })
+    try:
+        await ex.load_markets()
+        ohlcv = await ex.fetch_ohlcv(
+            symbol.strip(),
+            timeframe=interval.strip().lower(),
+            since=since,
+            limit=limit,
+        )
+        await ex.close()
+    except Exception as e:
+        await ex.close()
+        logger.warning(f"CCXT K线请求失败 {ex_name} {symbol} {interval}: {e}")
+        err_msg = str(e)
+        if "Timeout" in err_msg or "RequestTimeout" in type(e).__name__:
+            raise HTTPException(status_code=504, detail="上游 API 响应超时，请稍后重试")
+        raise HTTPException(status_code=502, detail=f"获取 K 线失败: {e}")
+
+    # CCXT: [[timestamp, open, high, low, close, volume], ...]，第 7 项可能为成交额，第 8 项可能为笔数
+    def to_kline(row: list) -> KlineData:
+        ts = int(row[0])
+        o, h, l, c, v = float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])
+        quote_vol = None
+        if len(row) > 6 and row[6] is not None:
+            try:
+                quote_vol = float(row[6])
+            except (TypeError, ValueError):
+                pass
+        trades = None
+        if len(row) > 7 and row[7] is not None:
+            try:
+                trades = int(row[7])
+            except (TypeError, ValueError):
+                pass
+        return KlineData(
+            timestamp=ts,
+            open=o,
+            high=h,
+            low=l,
+            close=c,
+            volume=v,
+            quote_volume=quote_vol,
+            trades=trades,
+        )
+
+    data = [to_kline(r) for r in (ohlcv or [])]
+    return ApiResponse.success(data=data, message="获取 K 线成功")
 
 
 @router.get("/depth/ccxt", response_model=ApiResponse[OrderBook])
@@ -294,7 +370,10 @@ async def get_depth_ccxt(
             detail=f"不支持的交易所: {exchange}，可选: {list(CCXT_EXCHANGES.keys())}",
         )
     ccxt_id = CCXT_EXCHANGES[ex_name]
-    ex = getattr(ccxt, ccxt_id)({"enableRateLimit": True})
+    ex = getattr(ccxt, ccxt_id)({
+        "enableRateLimit": True,
+        "timeout": settings.ccxt_timeout,
+    })
     try:
         await ex.load_markets()
         ob = await ex.fetch_order_book(symbol.strip(), limit)
