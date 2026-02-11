@@ -104,6 +104,13 @@ class ContractTicker24h(BaseModel):
         extra = "allow"  # Toobit 可能多字段，不丢弃
 
 
+class TickerRankings(BaseModel):
+    """24hr 涨跌排行与交易额排行（各前 5）"""
+    gainers: List[ContractTicker24h] = Field(..., description="涨幅前 5")
+    losers: List[ContractTicker24h] = Field(..., description="跌幅前 5")
+    by_volume: List[ContractTicker24h] = Field(..., description="成交额前 5")
+
+
 class KlineData(BaseModel):
     """K线数据"""
     timestamp: int = Field(..., description="时间戳（毫秒）")

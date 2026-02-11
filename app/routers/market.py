@@ -6,7 +6,7 @@ import httpx
 import ccxt.async_support as ccxt
 from app.config import settings
 from app.models.common import ApiResponse
-from app.models.market import SymbolInfo, ContractTicker24h, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry, KlineData
+from app.models.market import SymbolInfo, ContractTicker24h, TickerRankings, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry, KlineData
 from app.services.exchange_factory import ExchangeFactory
 from app.services.cache_service import CacheService
 from app.services.ccxt_markets_cache_service import CcxtMarketsCacheService, build_simple_market
@@ -265,6 +265,74 @@ async def get_ticker_24hr(
     items = [x for x in raw if isinstance(x, dict) and (type != "contract" or not _skip_tbv(x))]
     out: List[ContractTicker24h] = [ContractTicker24h.model_validate(x) for x in items]
     return ApiResponse.success(data=out, message=f"获取{type} 24hr 成功")
+
+
+def _parse_float(s: Optional[str], default: float) -> float:
+    if s is None or (isinstance(s, str) and not s.strip()):
+        return default
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return default
+
+
+@router.get("/ticker/rankings", response_model=ApiResponse[TickerRankings])
+async def get_ticker_rankings(
+    exchange: str = Query(default="toobit", description="交易所，当前仅支持 toobit"),
+    type: str = Query(default="contract", description="类型：spot(现货) 或 contract(合约)"),
+    limit: int = Query(default=5, ge=1, le=20, description="每类排行条数，默认 5"),
+):
+    """
+    涨跌排行 + 交易额排行。基于 24hr 数据，返回涨幅前 N、跌幅前 N、成交额前 N，默认每类 5 条。
+    """
+    if exchange != "toobit":
+        raise HTTPException(status_code=400, detail="当前仅支持 exchange=toobit")
+    if type not in ("spot", "contract"):
+        raise HTTPException(status_code=400, detail="type 必须是 spot 或 contract")
+
+    if type == "spot":
+        url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/ticker/24hr"
+        params: Dict = {}
+    else:
+        url = f"{settings.toobit_base_url.rstrip('/')}/quote/v1/contract/ticker/24hr"
+        params = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.toobit_timeout) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            raw = r.json()
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"Toobit {type} 24hr 请求失败: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=502, detail="上游 Toobit 返回错误")
+    except Exception as e:
+        logger.warning(f"Toobit {type} 24hr 请求异常: {e}")
+        raise HTTPException(status_code=502, detail="请求 Toobit 失败")
+
+    if not isinstance(raw, list):
+        raw = [raw] if raw else []
+
+    def _skip_tbv(item: dict) -> bool:
+        s = (item.get("s") or "").strip()
+        return s.startswith("TBV_") or s.startswith("TBV-")
+
+    items = [x for x in raw if isinstance(x, dict) and (type != "contract" or not _skip_tbv(x))]
+    tickers: List[ContractTicker24h] = [ContractTicker24h.model_validate(x) for x in items]
+
+    # 涨幅：pcp 从高到低取前 limit；跌幅：pcp 从低到高取前 limit；成交额：qv 从高到低取前 limit
+    def pcp_val(t: ContractTicker24h) -> float:
+        return _parse_float(t.pcp, float("-inf"))
+
+    def qv_val(t: ContractTicker24h) -> float:
+        return _parse_float(t.qv, 0.0)
+
+    sorted_by_pcp = sorted(tickers, key=pcp_val, reverse=True)
+    gainers = sorted_by_pcp[:limit]
+    losers = sorted(tickers, key=lambda t: _parse_float(t.pcp, float("inf")))[:limit]
+    by_volume = sorted(tickers, key=qv_val, reverse=True)[:limit]
+
+    result = TickerRankings(gainers=gainers, losers=losers, by_volume=by_volume)
+    return ApiResponse.success(data=result, message="获取排行成功")
 
 
 @router.get("/klines", response_model=ApiResponse[List[KlineData]])
