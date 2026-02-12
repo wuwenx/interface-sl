@@ -6,7 +6,7 @@ import httpx
 import ccxt.async_support as ccxt
 from app.config import settings
 from app.models.common import ApiResponse
-from app.models.market import SymbolInfo, ContractTicker24h, TickerRankings, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry, KlineData
+from app.models.market import SymbolInfo, ContractTicker24h, TickerRankings, FundingRateItem, CcxtContractSymbol, CcxtMarketInfo, CcxtMarketSimple, PaginatedCcxtContracts, OrderBook, OrderBookEntry, KlineData
 from app.services.exchange_factory import ExchangeFactory
 from app.services.cache_service import CacheService
 from app.services.ccxt_markets_cache_service import CcxtMarketsCacheService, build_simple_market
@@ -30,6 +30,16 @@ CCXT_EXCHANGES = {
     "binance": "binance",           # 币安现货
     "binance_usdm": "binanceusdm",  # 币安 U 本位合约
     "toobit": "toobit",
+}
+
+# 支持资金费率的合约交易所（CCXT fetch_funding_rates）
+FUNDING_RATE_EXCHANGES = {
+    "binance_usdm": "binanceusdm",
+    "toobit": "toobit",
+    "okx": "okx",
+    "bybit": "bybit",
+    "gateio": "gateio",
+    "bitget": "bitget",
 }
 
 
@@ -333,6 +343,88 @@ async def get_ticker_rankings(
 
     result = TickerRankings(gainers=gainers, losers=losers, by_volume=by_volume)
     return ApiResponse.success(data=result, message="获取排行成功")
+
+
+def _to_funding_rate_item(symbol: str, data: dict) -> FundingRateItem:
+    """CCXT 资金费率 dict 转为 FundingRateItem"""
+    fr = data.get("fundingRate")
+    if fr is None:
+        fr = 0.0
+    try:
+        fr = float(fr)
+    except (TypeError, ValueError):
+        fr = 0.0
+    return FundingRateItem(
+        symbol=symbol,
+        funding_rate=fr,
+        funding_timestamp=data.get("fundingTimestamp"),
+        next_funding_rate=data.get("nextFundingRate") if data.get("nextFundingRate") is not None else None,
+        previous_funding_rate=data.get("previousFundingRate") if data.get("previousFundingRate") is not None else None,
+    )
+
+
+@router.get("/funding-rates", response_model=ApiResponse[Dict[str, List[FundingRateItem]]])
+async def get_funding_rates(
+    exchange: str = Query(
+        default="binance_usdm,toobit",
+        description="交易所，逗号分隔。支持: binance_usdm, toobit, okx, bybit, gateio, bitget",
+    ),
+    symbol: Optional[str] = Query(default=None, description="可选，按交易对过滤（包含即匹配，如 BTC 匹配 BTC/USDT:USDT）"),
+):
+    """
+    获取多交易所资金费率（CCXT fetch_funding_rates），供前端矩阵展示。
+    返回按交易所分组的费率列表，每条含 symbol、funding_rate（小数）、funding_timestamp、next_funding_rate（如有）。
+    """
+    names = [x.strip().lower() for x in exchange.split(",") if x.strip()]
+    if not names:
+        raise HTTPException(status_code=400, detail="请至少指定一个交易所")
+    for n in names:
+        if n not in FUNDING_RATE_EXCHANGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的交易所: {n}，可选: {list(FUNDING_RATE_EXCHANGES.keys())}",
+            )
+
+    result: Dict[str, List[FundingRateItem]] = {}
+    symbol_filter = (symbol.strip().upper() if symbol and symbol.strip() else None) or None
+
+    for our_name in names:
+        ccxt_id = FUNDING_RATE_EXCHANGES[our_name]
+        ex = getattr(ccxt, ccxt_id)({
+            "enableRateLimit": True,
+            "timeout": settings.ccxt_timeout,
+        })
+        try:
+            await ex.load_markets()
+            rates = await ex.fetch_funding_rates()
+        except Exception as e:
+            logger.warning(f"CCXT 资金费率请求失败 {our_name}: {e}")
+            result[our_name] = []
+            continue
+        finally:
+            try:
+                await ex.close()
+            except Exception:
+                pass
+
+        if not isinstance(rates, dict):
+            rates = {}
+        items: List[FundingRateItem] = []
+        for sym, data in rates.items():
+            if not isinstance(data, dict):
+                continue
+            if our_name == "toobit":
+                info = data.get("info") or {}
+                native_id = (info.get("symbol") or sym or "").upper()
+                if native_id.startswith("TBV_") or native_id.startswith("TBV-"):
+                    continue
+            if symbol_filter and symbol_filter not in (sym or "").upper():
+                continue
+            items.append(_to_funding_rate_item(sym, data))
+        result[our_name] = items
+        logger.info(f"资金费率 {our_name}: {len(items)} 条")
+
+    return ApiResponse.success(data=result, message="获取资金费率成功")
 
 
 @router.get("/klines", response_model=ApiResponse[List[KlineData]])

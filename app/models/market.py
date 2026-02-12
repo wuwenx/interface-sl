@@ -111,6 +111,26 @@ class TickerRankings(BaseModel):
     by_volume: List[ContractTicker24h] = Field(..., description="成交额前 5")
 
 
+class FundingRateItem(BaseModel):
+    """单条资金费率（CCXT 统一格式）"""
+    symbol: str = Field(..., description="CCXT 交易对，如 BTC/USDT:USDT")
+    funding_rate: float = Field(..., description="当前资金费率（小数，如 0.0001 表示 0.01%）")
+    funding_timestamp: Optional[int] = Field(None, description="下次结算时间戳（毫秒）")
+    next_funding_rate: Optional[float] = Field(None, description="预测下一期费率，部分交易所提供")
+    previous_funding_rate: Optional[float] = Field(None, description="上一期费率，部分交易所提供")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "symbol": "BTC/USDT:USDT",
+                "funding_rate": -0.0000655,
+                "funding_timestamp": 1770825600000,
+                "next_funding_rate": None,
+                "previous_funding_rate": None,
+            }
+        }
+
+
 class KlineData(BaseModel):
     """K线数据"""
     timestamp: int = Field(..., description="时间戳（毫秒）")
