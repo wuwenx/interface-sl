@@ -1,11 +1,11 @@
 """新闻快讯服务：从可配置数据源（API/RSS）抓取并入库，提供列表与详情，支持中文翻译"""
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 import feedparser
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.models.db_models import NewsArticle
+from app.models.db_models import NewsArticle, NewsFetchState
 from app.config import get_news_sources
 from app.utils.logger import logger
 
@@ -51,6 +51,32 @@ def _parse_published_time(ts: Any) -> Optional[datetime]:
         return None
     except Exception:
         return None
+
+
+async def get_last_news_fetch_time(db: AsyncSession) -> Optional[datetime]:
+    """获取上次新闻拉取时间（UTC），无记录返回 None。"""
+    try:
+        result = await db.execute(
+            select(NewsFetchState.last_fetched_at).where(NewsFetchState.id == 1)
+        )
+        row = result.scalars().first()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+async def set_last_news_fetch_time(db: AsyncSession, at: datetime) -> None:
+    """更新上次新闻拉取时间为 at（建议使用 UTC）。"""
+    try:
+        result = await db.execute(select(NewsFetchState).where(NewsFetchState.id == 1))
+        row = result.scalars().first()
+        if row:
+            row.last_fetched_at = at
+        else:
+            db.add(NewsFetchState(id=1, last_fetched_at=at))
+        await db.flush()
+    except Exception as e:
+        logger.warning(f"更新新闻拉取时间失败: {e}")
 
 
 async def _fetch_api(source: Dict[str, Any]) -> List[Dict[str, Any]]:

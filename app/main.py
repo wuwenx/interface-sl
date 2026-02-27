@@ -84,20 +84,36 @@ async def startup_event():
     logger.info("CCXT watch_tickers WS 已就绪: /ws")
     logger.info("CCXT watch_ohlcv K线 WS 已就绪: /ws/klines")
 
-    # 新闻快讯：启动时拉取一次，便于首屏有数据
+    # 新闻快讯：仅当距上次拉取已超过 24 小时（或从未拉取）时才拉取，不每次启动都拉
     try:
         from app.database import AsyncSessionLocal
-        from app.services.news_service import fetch_all_sources_and_save
-        async def _first_news_fetch():
+        from app.services.news_service import (
+            fetch_all_sources_and_save,
+            get_last_news_fetch_time,
+            set_last_news_fetch_time,
+        )
+        from datetime import datetime, timezone
+
+        async def _maybe_news_fetch():
             try:
                 async with AsyncSessionLocal() as session:
+                    last = await get_last_news_fetch_time(session)
+                    now = datetime.now(timezone.utc)
+                    # 无记录或距上次拉取 >= 24 小时才拉取
+                    if last is not None:
+                        last_utc = last.replace(tzinfo=timezone.utc) if last.tzinfo is None else last
+                        if (now - last_utc).total_seconds() < 86400:  # 24h
+                            logger.info("新闻快讯距上次拉取未满 24 小时，跳过本次拉取")
+                            return
                     n = await fetch_all_sources_and_save(session)
+                    await set_last_news_fetch_time(session, now)
                     await session.commit()
-                    logger.info(f"新闻快讯首次拉取完成，写入 {n} 条")
+                    logger.info(f"新闻快讯拉取完成，写入 {n} 条")
             except Exception as e:
-                logger.warning(f"新闻快讯首次拉取失败: {e}")
+                logger.warning(f"新闻快讯拉取失败: {e}")
+
         import asyncio
-        asyncio.create_task(_first_news_fetch())
+        asyncio.create_task(_maybe_news_fetch())
     except Exception as e:
         logger.warning(f"新闻快讯启动拉取未执行: {e}")
 

@@ -22,6 +22,14 @@ class CcxtMarketsCache(Base):
     )
 
 
+class NewsFetchState(Base):
+    """新闻拉取状态（单行，记录上次拉取时间，用于 24 小时只拉一次）"""
+    __tablename__ = "news_fetch_state"
+
+    id = Column(Integer, primary_key=True, comment="固定为 1，单行")
+    last_fetched_at = Column(DateTime, nullable=True, comment="上次拉取新闻时间（UTC）")
+
+
 class NewsArticle(Base):
     """新闻快讯表（多数据源抓取后统一存储，支持中文翻译）"""
     __tablename__ = "news_articles"

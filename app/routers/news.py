@@ -6,7 +6,7 @@ from app.models.common import ApiResponse
 from app.models.news import NewsArticleListItem, NewsArticleDetail, PaginatedNews
 from app.models.db_models import NewsArticle as NewsArticleORM
 from app.database import get_db
-from app.services.news_service import NewsService, fetch_all_sources_and_save, translate_missing_zh
+from app.services.news_service import NewsService, fetch_all_sources_and_save, set_last_news_fetch_time, translate_missing_zh
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -107,7 +107,9 @@ async def refresh_news(db: Optional[AsyncSession] = Depends(get_db)):
     if db is None:
         raise HTTPException(status_code=503, detail="数据库未连接，新闻功能不可用")
     try:
+        from datetime import datetime, timezone
         count = await fetch_all_sources_and_save(db)
+        await set_last_news_fetch_time(db, datetime.now(timezone.utc))
         return ApiResponse.success(data={"count": count}, message=f"已拉取并写入 {count} 条")
     except Exception as e:
         logger.exception("新闻拉取失败")

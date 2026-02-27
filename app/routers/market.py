@@ -346,17 +346,25 @@ async def get_ticker_rankings(
 
 
 def _to_funding_rate_item(symbol: str, data: dict) -> FundingRateItem:
-    """CCXT 资金费率 dict 转为 FundingRateItem"""
+    """CCXT 资金费率 dict 转为 FundingRateItem。funding_rate 转为普通小数字符串，避免科学计数法。"""
     fr = data.get("fundingRate")
     if fr is None:
-        fr = 0.0
-    try:
-        fr = float(fr)
-    except (TypeError, ValueError):
-        fr = 0.0
+        funding_rate_str = "0"
+    else:
+        try:
+            v = float(fr)
+            if v == 0:
+                funding_rate_str = "0"
+            else:
+                # 格式化为固定小数，去掉尾部零，避免 1e-07 这类科学计数
+                funding_rate_str = f"{v:.16f}".rstrip("0").rstrip(".")
+                if not funding_rate_str or funding_rate_str == "-":
+                    funding_rate_str = "0"
+        except (TypeError, ValueError):
+            funding_rate_str = "0"
     return FundingRateItem(
         symbol=symbol,
-        funding_rate=fr,
+        funding_rate=funding_rate_str,
         funding_timestamp=data.get("fundingTimestamp"),
         next_funding_rate=data.get("nextFundingRate") if data.get("nextFundingRate") is not None else None,
         previous_funding_rate=data.get("previousFundingRate") if data.get("previousFundingRate") is not None else None,
@@ -395,7 +403,9 @@ async def get_funding_rates(
             "timeout": settings.ccxt_timeout,
         })
         try:
-            await ex.load_markets()
+            # 仅 Toobit 调用 load_markets；其他交易所直接请求资金费率，减少耗时
+            if our_name == "toobit":
+                await ex.load_markets()
             rates = await ex.fetch_funding_rates()
         except Exception as e:
             logger.warning(f"CCXT 资金费率请求失败 {our_name}: {e}")
@@ -418,7 +428,11 @@ async def get_funding_rates(
                 native_id = (info.get("symbol") or sym or "").upper()
                 if native_id.startswith("TBV_") or native_id.startswith("TBV-"):
                     continue
-            if symbol_filter and symbol_filter not in (sym or "").upper():
+            # 只保留 USDT 资金费率，过滤掉 USDC 等
+            sym_upper = (sym or "").upper()
+            if "USDC" in sym_upper or "USDT" not in sym_upper:
+                continue
+            if symbol_filter and symbol_filter not in sym_upper:
                 continue
             items.append(_to_funding_rate_item(sym, data))
         result[our_name] = items
